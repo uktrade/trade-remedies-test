@@ -1,0 +1,193 @@
+# Python CircleCI 2.0 configuration file
+#
+# Check https://circleci.com/docs/2.0/language-python/ for more details
+#
+
+version: 2
+jobs:
+  build:
+    machine:
+      image: ubuntu-1604:201903-01
+    parallelism: 9
+    steps:
+      - checkout
+      - run:
+          name: "Switch to Python v3.7"
+          command: |
+            pyenv versions
+            pyenv global 3.7.0
+
+      # Download and cache dependencies
+      - restore_cache:
+          keys:
+            - v2-dependencies-{{ checksum "requirements.txt" }}
+            # fallback to using the latest cache if no exact match is found
+            - v2-dependencies-
+
+      - run:
+          name: "Install Python Libraries"
+          command: |
+            python -V
+            python -m venv venv
+            . venv/bin/activate
+            pip install -r requirements.txt
+
+      - run:
+          name: "Install ChromeDriver"
+          command: |
+            wget -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+            sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
+            sudo apt-get update
+            sudo apt-get install -y unzip google-chrome-stable
+            wget http://chromedriver.storage.googleapis.com/70.0.3538.16/chromedriver_linux64.zip -P ~/Downloads
+            unzip ~/Downloads/chromedriver_linux64.zip -d ~/Downloads
+            chmod +x ~/Downloads/chromedriver
+            sudo mv -f ~/Downloads/chromedriver /usr/local/bin/chromedriver
+      - save_cache:
+          paths:
+            - ./venv
+          key: v1-dependencies-{{ checksum "requirements.txt" }}
+
+      - run:
+          name: "Run Postgres"
+          command: |
+            docker run -d \
+            -e POSTGRES_DB='trade_remedies' \
+            -e POSTGRES_USER='uktrade' \
+            -e POSTGRES_PASSWORD='uktrade' \
+            --net=host \
+            postgres:10.1
+      - run:
+          name: "Run Redis"
+          command: docker run -d --net=host redis:alpine
+      - run:
+          name: "Run Trade Remedies API"
+          command: |
+            docker login quay.io -u $QUAY_USERNAME -p $QUAY_PASSWORD
+            docker run -d \
+            -e ALLOWED_HOSTS='localhost' \
+            -e CASEWORKER_ROOT_URL='http://localhost:8001' \
+            -e DB_HOST='localhost' \
+            -e DB_PORT='5432' \
+            -e DB_USER='uktrade' \
+            -e DB_PASSWORD='uktrade' \
+            -e DB_NAME='trade_remedies' \
+            -e DEBUG='True' \
+            -e DJANGO_ADMIN='True' \
+            -e DJANGO_SECRET_KEY=$DJANGO_SECRET_KEY \
+            -e DJANGO_SETTINGS_MODULE='trade_remedies_api.settings.local' \
+            -e MASTER_ADMIN_EMAIL=$MASTER_ADMIN_EMAIL \
+            -e MASTER_ADMIN_PASSWORD=$MASTER_ADMIN_PASSWORD \
+            -e SENTRY_DSN=$SENTRY_DSN_API \
+            -e SENTRY_ENVIRONMENT='autotest' \
+            -e HEALTH_CHECK_USER_TOKEN=$HEALTH_CHECK_USER_TOKEN \
+            -e HEALTH_CHECK_USER_EMAIL=$HEALTH_CHECK_USER_EMAIL \
+            -e S3_BUCKET_NAME=$S3_BUCKET_NAME \
+            -e S3_STORAGE_KEY=$S3_STORAGE_KEY \
+            -e S3_STORAGE_SECRET=$S3_STORAGE_SECRET \
+            -e AV_SERVICE_URL=$AV_SERVICE_URL \
+            -e AV_SERVICE_USERNAME=$AV_SERVICE_USERNAME \
+            -e AV_SERVICE_PASSWORD=$AV_SERVICE_PASSWORD \
+            -e GOV_NOTIFY_API_KEY=$GOV_NOTIFY_API_KEY \
+            -e GOV_NOTIFY_SERVICE_ID=$GOV_NOTIFY_SERVICE_ID \
+            -e GOV_NOTIFY_SERVICE_API_KEY=$GOV_NOTIFY_SERVICE_API_KEY \
+            -e PUBLIC_ROOT_URL='http://localhost:8002' \
+            -e DOCUMENT_CONTENT_TYPE_ID='27' \
+            -e CASE_WORKER_ENVIRONMENT_KEY='CW-ENV' \
+            -e PUBLIC_ENVIRONMENT_KEY='PUB-ENV' \
+            -e CELERY_LOGLEVEL='info' \
+            -e CELERY_TASK_ALWAYS_EAGER='True' \
+            -e CELERY_REDIS_DATABASE_NUMBER='2' \
+            -e VCAP_SERVICES='{"redis":[{"credentials":{"uri":"redis://localhost:6379"}}]}' \
+            -e REDIS_DATABASE_NUMBER='1' \
+            -e PRE_RELEASE_INVITATIONS='True' \
+            -e PRE_RELEASE_ARCHIVE='True' \
+            --name trade-remedies-api-cli --net=host quay.io/uktrade/trade-remedies-api
+
+      - run:
+          name: "Run Trade Remedies Caseworker"
+          command: |
+            docker run -d \
+            -e ALLOWED_HOSTS='localhost' \
+            -e DJANGO_SECRET_KEY=$DJANGO_SECRET_KEY \
+            -e HEALTH_CHECK_TOKEN=$HEALTH_CHECK_USER_TOKEN \
+            -e ENVIRONMENT_KEY='CW-ENV' \
+            -e SECURE_COOKIE='False' \
+            -e USE_2FA='False' \
+            -e VCAP_SERVICES='{"redis":[{"credentials":{"uri":"redis://localhost:6379"}}]}' \
+            -e REDIS_DATABASE_NUMBER='1' \
+            -e DEBUG='True' \
+            -e SENTRY_DSN=$SENTRY_DSN_CASEWORKER \
+            -e SENTRY_ENVIRONMENT='autotest' \
+            -e API_BASE_URL='http://localhost:8000' \
+            --name trade-remedies-caseworker-cli --net=host quay.io/uktrade/trade-remedies-caseworker
+
+      - run:
+          name: "Run Trade Remedies Public"
+          command: |
+            docker run -d \
+            -e ALLOWED_HOSTS='localhost' \
+            -e DJANGO_SECRET_KEY=$DJANGO_SECRET_KEY \
+            -e HEALTH_CHECK_TOKEN=$HEALTH_CHECK_USER_TOKEN \
+            -e ENVIRONMENT_KEY='PUB-ENV' \
+            -e SECURE_COOKIE='False' \
+            -e USE_2FA='False' \
+            -e VERIFY_EMAIL='False' \
+            -e ACCOUNT_INFO_READ_ONLY='False' \
+            -e VCAP_SERVICES='{"redis":[{"credentials":{"uri":"redis://localhost:6379"}}]}' \
+            -e REDIS_DATABASE_NUMBER='1' \
+            -e DEBUG='TRUE' \
+            -e SENTRY_DSN=$SENTRY_DSN_PUBLIC \
+            -e SENTRY_ENVIRONMENT='autotest' \
+            -e API_BASE_URL='http://localhost:8000' \
+            --name trade-remedies-public-cli --net=host quay.io/uktrade/trade-remedies-public
+
+      - run:
+          name: "Wait for services to be responsive"
+          command: |
+            wget https://github.com/jwilder/dockerize/releases/download/v0.6.1/dockerize-linux-amd64-v0.6.1.tar.gz
+            sudo tar -C /usr/local/bin -xzvf dockerize-linux-amd64-v0.6.1.tar.gz
+            dockerize -timeout 120s -wait tcp://localhost:6379 -wait tcp://localhost:5432 -wait tcp://localhost:8000 -wait tcp://localhost:8001 -wait tcp://localhost:8002
+            sleep 20
+
+      - run:
+          name: "Run Test Scripts"
+          command: |
+            . venv/bin/activate
+            mkdir -p test-results
+            circleci tests glob "functional_tests/**/test*.py"
+#            | circleci tests split --split-by=timings | xargs python -m pytest -v -rxXs --tb=short --headless --junitxml=test_results/results.xml
+          no_output_timeout: 90m
+
+      - store_test_results:
+          path: test_results
+
+      - store_artifacts:
+          path: test_results
+
+# AUTO RUN NIGHTLY - DISABLED FOR NOW
+# workflows:
+#   version: 2
+#   commit:
+#     jobs:
+#       - build
+#   1AM:
+#     triggers:
+#       - schedule:
+#           cron: "0 1 * * *"
+#           filters:
+#             branches:
+#               only:
+#                 - master
+#     jobs:
+#       - build
+#   1PM:
+#     triggers:
+#       - schedule:
+#           cron: "0 13 * * *"
+#           filters:
+#             branches:
+#               only:
+#                 - master
+#     jobs:
+#       - build

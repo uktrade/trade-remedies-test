@@ -1,0 +1,24 @@
+{
+  "name": "trade-remedies-test",
+  "version": "1.0.0",
+  "description": "A suite of functional tests for the Trade Remedies application using Selenium Webdriver.",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "test": "echo \"try running 'make test'\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uktrade/trade-remedies-test_archived.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/uktrade/trade-remedies-test_archived/issues"
+  },
+  "homepage": "https://github.com/uktrade/trade-remedies-test_archived#readme",
+  "devDependencies": {
+    "all-contributors-cli": "^6.17.2"
+  }
+}
